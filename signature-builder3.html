@@ -29,10 +29,17 @@
   .stage{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
   canvas{width:140px;height:140px;border:1px solid var(--line);border-radius:8px;background:#fff}
   #sigPreview{border:1px solid var(--line);border-radius:8px;padding:18px;background:#fff;overflow:auto}
-  textarea{width:100%;height:190px;font-family:Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px}
+  textarea{width:100%;height:220px;font-family:Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:10px}
   .note{font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0 0}
-  .msg{font-size:13px;margin-top:8px;color:#2a7f3b;min-height:18px}
-  .msg.err{color:#b3261e}
+  .msg{font-size:13px;margin-top:10px;color:#2a7f3b;line-height:1.5}
+  .msg:empty{display:none}
+  .msg.ok{background:#eaf7ee;padding:8px 10px;border-radius:8px}
+  .msg.err{color:#b3261e;background:#fdecea;padding:8px 10px;border-radius:8px;font-weight:bold}
+  input.flash{border-color:#b3261e;box-shadow:0 0 0 3px #fdecea}
+  .fallback{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fafcfc;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .fallback img{width:110px;height:110px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .fallback a{color:#0b6fa4;font-weight:bold}
+  textarea{resize:vertical}
 </style>
 </head>
 <body>
@@ -68,6 +75,14 @@
         <button id="dl" class="alt" disabled>Download GIF</button>
       </div>
       <div class="msg" id="gifMsg"></div>
+      <div class="fallback" id="saveFallback" hidden>
+        <img id="saveImg" alt="Your animated GIF">
+        <div class="note" style="margin:0">
+          <b>Download didn't start?</b> Use this link instead:<br>
+          <a id="saveLink" href="#">Save the GIF to my computer</a><br>
+          Or right-click the picture (press and hold on a phone or tablet) and choose Save Image.
+        </div>
+      </div>
       <p class="note">Upload the downloaded GIF somewhere public (your website media library works well), then paste its web address below. Email apps cannot show images that only live on your computer.</p>
       <label>Web address of your uploaded GIF</label>
       <input type="text" id="url" placeholder="https://tinybull.com/wp-content/uploads/your-signature.gif">
@@ -81,8 +96,9 @@
       </div>
       <div class="msg" id="copyMsg"></div>
       <p class="note"><b>Gmail:</b> Settings, See all settings, Signature, then paste the copied signature into the box.<br><b>Apps that accept HTML:</b> use Copy HTML code instead.</p>
-      <label>HTML code</label>
-      <textarea id="code" readonly></textarea>
+      <label>HTML code <span style="color:#99a6ad">(you can edit it here. Changing the boxes on the left or the web address will reset it.)</span></label>
+      <textarea id="code" spellcheck="false"></textarea>
+      <div class="row"><button id="resetCode" class="alt">Reset code</button></div>
     </div>
   </div>
 </main>
@@ -153,7 +169,8 @@ function holdFrame(fn){
   const x = cv.getContext('2d'); clearWhite(x); fn(x); return cv;
 }
 $('make').onclick = () => {
-  $('make').disabled = true; $('gifMsg').className='msg'; $('gifMsg').textContent = 'Creating... this takes a few seconds.';
+  $('make').disabled = true; $('gifMsg').className='msg ok'; $('gifMsg').textContent = 'Creating... this takes a few seconds.';
+  try {
   const workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], {type:'text/javascript'}));
   const gif = new GIF({workers:4, quality:4, width:S, height:S, workerScript:workerUrl, repeat:0, dither:false});
   gif.addFrame(holdFrame(drawLogoFrame), {delay:HOLD});
@@ -165,14 +182,41 @@ $('make').onclick = () => {
     if(gifUrl) URL.revokeObjectURL(gifUrl);
     gifUrl = URL.createObjectURL(blob);
     $('dl').disabled = false; $('make').disabled = false;
-    $('gifMsg').textContent = 'Done (' + Math.round(blob.size/1024) + ' KB). Download it, upload it to your site, and paste the web address below.';
+    $('gifMsg').className='msg ok'; $('gifMsg').textContent = 'Done (' + Math.round(blob.size/1024) + ' KB). Download it, upload it to your site, and paste the web address below.';
     render();
+    showSaveFallback();
   });
   gif.render();
+  } catch(err){
+    $('make').disabled = false; $('gifMsg').className='msg err';
+    $('gifMsg').textContent = 'Something went wrong creating the GIF. Try Chrome or Edge, or refresh the page and try again.';
+  }
 };
+function fileName(){
+  const n = $('name').value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'signature';
+  return n + '-signature.gif';
+}
+function showSaveFallback(){
+  if(!gifUrl) return;
+  $('saveFallback').hidden = false;
+  $('saveImg').src = gifUrl;
+  const l = $('saveLink'); l.href = gifUrl; l.setAttribute('download', fileName());
+}
+function saveBlob(blob, filename){
+  if(navigator.msSaveOrOpenBlob){ navigator.msSaveOrOpenBlob(blob, filename); return; }
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = u; a.download = filename; a.rel = 'noopener'; a.style.display = 'none';
+  document.body.appendChild(a);   // must be in the page for Firefox and Safari
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(u); }, 15000);
+}
 $('dl').onclick = () => {
-  const n = ($('name').value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-') || 'signature');
-  const a = document.createElement('a'); a.href = gifUrl; a.download = n + '-signature.gif'; a.click();
+  if(!gifBlob) return;
+  saveBlob(gifBlob, fileName());
+  showSaveFallback();
+  $('gifMsg').className = 'msg ok';
+  $('gifMsg').textContent = 'Saving ' + fileName() + '. Check your Downloads folder. If nothing appears, use the Save link below.';
 };
 
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -202,31 +246,84 @@ function sigHtml(imgSrc){
 </table>`;
 }
 const PLACEHOLDER = 'YOUR_GIF_WEB_ADDRESS_HERE';
-function render(){
-  const url = $('url').value.trim();
-  $('code').value = sigHtml(url || PLACEHOLDER);
-  let prev = gifUrl;
-  if(!prev){ const c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d'); clearWhite(x); drawLogoFrame(x); prev=c.toDataURL('image/png'); }
-  $('sigPreview').innerHTML = sigHtml(prev);
+let genToken = PLACEHOLDER, logoPrev = null;
+function previewSrc(){
+  if(gifUrl) return gifUrl;
+  if(!logoPrev){ const c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d'); clearWhite(x); drawLogoFrame(x); logoPrev=c.toDataURL('image/png'); }
+  return logoPrev;
 }
-['name','title','phone','site','addr','url'].forEach(id => $(id).oninput = render);
+function renderPreview(){
+  const code = $('code').value;
+  const token = esc(genToken);
+  $('sigPreview').innerHTML = code.includes(token) ? code.split(token).join(previewSrc()) : code;
+}
+function render(){            // rebuild the code from the form boxes
+  genToken = $('url').value.trim() || PLACEHOLDER;
+  $('code').value = sigHtml(genToken);
+  renderPreview();
+}
+['name','title','phone','site','addr'].forEach(id => $(id).oninput = render);
+$('url').oninput = () => { $('url').classList.remove('flash'); render(); };
+$('code').oninput = renderPreview;      // typing in the code box updates the preview only
+$('resetCode').onclick = () => { render(); say('Code reset to match the boxes on the left.'); };
 
-function say(t, err){ const m=$('copyMsg'); m.textContent=t; m.className='msg'+(err?' err':''); }
-$('copyCode').onclick = async () => {
-  if(!$('url').value.trim()){ say('Add the web address of your GIF in step 3 first.', true); return; }
-  try{ await navigator.clipboard.writeText($('code').value); say('HTML code copied.'); }catch(e){ $('code').select(); document.execCommand('copy'); say('HTML code copied.'); }
-};
-$('copyRich').onclick = async () => {
-  if(!$('url').value.trim()){ say('Add the web address of your GIF in step 3 first.', true); return; }
+function say(t, err){ const m=$('copyMsg'); m.textContent=t; m.className = t ? 'msg ' + (err ? 'err' : 'ok') : 'msg'; }
+function needUrl(){
+  if(!$('code').value.includes(PLACEHOLDER)) return false;
+  const u = $('url'); u.classList.add('flash');
+  u.scrollIntoView({block:'center', behavior:'smooth'}); u.focus();
+  say('Almost there. Paste the web address of your uploaded GIF into the box in step 3 first. The signature needs it so your image shows up in other people\u2019s inboxes.', true);
+  return true;
+}
+
+// Rich copy that works in every major browser: copy event + hidden selection
+function copyRichSync(html, plain){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;background:#fff';
+  document.body.appendChild(tmp);
+  const sel = getSelection(), range = document.createRange();
+  range.selectNodeContents(tmp); sel.removeAllRanges(); sel.addRange(range);
+  let ok = false;
+  const handler = e => {
+    e.clipboardData.setData('text/html', html);
+    e.clipboardData.setData('text/plain', plain || tmp.innerText);
+    e.preventDefault(); ok = true;
+  };
+  document.addEventListener('copy', handler);
+  let cmd = false;
+  try{ cmd = document.execCommand('copy'); }catch(e){}
+  document.removeEventListener('copy', handler);
+  sel.removeAllRanges(); tmp.remove();
+  return ok || cmd;
+}
+function copyTextSync(text){
+  const ta = $('code');
+  const keep = [ta.selectionStart, ta.selectionEnd];
+  ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try{ ok = document.execCommand('copy'); }catch(e){}
+  ta.setSelectionRange(keep[0], keep[1]);
+  return ok;
+}
+const FAIL = 'Your browser blocked copying. Click inside the HTML code box, press Ctrl+A then Ctrl+C (Cmd+A then Cmd+C on a Mac), or try Chrome.';
+
+$('copyRich').onclick = () => {
+  if(needUrl()) return;
   const html = $('code').value;
-  try{
-    await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([html],{type:'text/plain'})})]);
-    say('Signature copied. Paste it into your email signature box.');
-  }catch(e){
-    const tmp = document.createElement('div'); tmp.innerHTML = html; tmp.style.position='fixed'; tmp.style.left='-9999px'; document.body.appendChild(tmp);
-    const r = document.createRange(); r.selectNodeContents(tmp); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    document.execCommand('copy'); s.removeAllRanges(); tmp.remove(); say('Signature copied. Paste it into your email signature box.');
-  }
+  if(copyRichSync(html)){ say('Signature copied. Paste it into your email signature box.'); return; }
+  if(navigator.clipboard && window.ClipboardItem){
+    navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([html],{type:'text/plain'})})])
+      .then(() => say('Signature copied. Paste it into your email signature box.'), () => say(FAIL, true));
+  } else say(FAIL, true);
+};
+$('copyCode').onclick = () => {
+  if(needUrl()) return;
+  const text = $('code').value;
+  if(copyTextSync(text)){ say('HTML code copied.'); return; }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(() => say('HTML code copied.'), () => say(FAIL, true));
+  } else say(FAIL, true);
 };
 
 logoImg.onload = () => { redrawPhoto(); render(); };
